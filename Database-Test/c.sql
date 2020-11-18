@@ -1,0 +1,2 @@
+select p.method_name, p.payment_method_id, count(o.payment_method_id) as TotalUsed from paymentmethods p, orders o where p.payment_method_id = o.payment_method_id
+group by p.method_name, p.payment_method_id order by count(o.payment_method_id) desc
