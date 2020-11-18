@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS orderDetails;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS paymentMethods;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS tokens;
+DROP TABLE IF EXISTS customers;
+
+
+
