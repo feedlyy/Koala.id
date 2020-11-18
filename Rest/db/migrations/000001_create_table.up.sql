@@ -11,9 +11,8 @@ CREATE TABLE customers (
 );
 
 CREATE TABLE tokens (
-    token_id INT NOT NULL PRIMARY KEY,
+    token_id VARCHAR(100) NOT NULL PRIMARY KEY,
     token VARCHAR(100),
-    access TIMESTAMP,
     refresh_type VARCHAR(100),
     customer_id VARCHAR(64) NOT NULL REFERENCES customers (customer_id) ON DELETE CASCADE
 );

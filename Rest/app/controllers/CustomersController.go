@@ -174,15 +174,155 @@ func Register (w http.ResponseWriter, r *http.Request) {
 
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
-
 		}
 	}
-
-
 }
 
-func GetToken () {
+type getUser struct {
+	Email 		string `json:"email" form:"email" validate:"required,email"`
+	Password 	string `json:"password" form:"password" validate:"required"`
+}
 
+func comparePasswords(hashedPwd string, plainPwd []byte) bool { // check hashed pwd
+	byteHash := []byte(hashedPwd)
+	err := bcrypt.CompareHashAndPassword(byteHash, plainPwd)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
+	return true
+}
+
+func GetToken (w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		w.WriteHeader(405)
+		_ = json.NewEncoder(w).Encode("Method Not Allowed")
+	} else {
+		var customers models.Customers
+		var token models.Tokens
+
+		email := r.FormValue("email")
+		password := r.FormValue("password")
+
+		//translator for validator input
+		translator := en.New()
+		uni := ut.New(translator, translator)
+
+		// this is usually known or extracted from http 'Accept-Language' header
+		// also see uni.FindTranslator(...)
+		trans, found := uni.GetTranslator("en")
+		if !found {
+			log.Fatal("translator not found")
+		}
+
+		v := validator.New()
+
+		if err := en_translations.RegisterDefaultTranslations(v, trans); err != nil {
+			log.Fatal(err)
+		}
+
+		_ = v.RegisterTranslation("required", trans, func(ut ut.Translator) error {
+			return ut.Add("required", "{0} is a required field", true) // see universal-translator for details
+		}, func(ut ut.Translator, fe validator.FieldError) string {
+			t, _ := ut.T("required", fe.Field())
+			return t
+		})
+
+		check := getUser {
+			Email: 			  email,
+			Password:         password,
+		}
+
+		err := v.Struct(check)
+
+		dbConnect := db.Connect() //open connection
+
+		//validation password from db
+		getSalt, errr := dbConnect.Query("select customer_id," +
+			"salt,password from customers where email = $1", email)
+		if errr != nil {
+			log.Fatal(errr)
+		}
+		salt := ""
+		hashedPwd := ""
+		custId := ""
+		for getSalt.Next() {
+			if err := getSalt.Scan(&customers.CustomerId, &customers.Salt, &customers.Password); err != nil {
+				log.Fatal(err.Error())
+			} else {
+				salt = customers.Salt
+				hashedPwd = customers.Password
+				custId = customers.CustomerId
+			}
+		}
+
+		pwdByte := getPwd(password+salt) // get current input from user and added with salt from db
+		pwd := comparePasswords(hashedPwd,pwdByte) // boolean whether the password true or false
+
+		//validation for email
+		emailCheck, errorr := dbConnect.Query("select email from customers where email = $1", email)
+		if errorr != nil {
+			log.Fatal(errorr)
+		}
+		emails := []string{}
+		for emailCheck.Next() {
+			if err := emailCheck.Scan(&customers.Email); err != nil {
+				log.Fatal(err.Error())
+			} else {
+				emails = append(emails, customers.Email)
+			}
+		}
+
+		if err != nil {
+			for _, errors := range err.(validator.ValidationErrors) {
+				w.WriteHeader(400)
+				_ = json.NewEncoder(w).Encode(errors.Translate(trans))
+			}
+		} else if len(emails) == 0 || pwd == false {
+			w.WriteHeader(400)
+			_ = json.NewEncoder(w).Encode("Invalid Credentials (email or password)")
+		} else {
+			sqlStatement := `insert into tokens (token_id, token, refresh_type, customer_id)
+			VALUES ($1, $2, $3, $4)
+			RETURNING token_id`
+			token_id := ""
+			err = dbConnect.QueryRow(sqlStatement, uniuri.NewLen(15), uniuri.NewLen(64),
+				uniuri.NewLen(64), custId).Scan(&token_id)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Println(token_id)
+
+			getLast, err := dbConnect.Query("select token,refresh_type from tokens where token_id = $1", token_id)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			type getTokens struct {
+				Token string
+				RefreshType string
+				Access string
+			}
+
+			var showToken getTokens // for display the result
+
+			// get the data from query and add it to customers struct
+			for getLast.Next() {
+				if err := getLast.Scan(&token.Token, &token.RefreshType); err != nil {
+					log.Fatal(err.Error())
+				} else {
+					showToken.Access = uniuri.NewLen(20)
+					showToken.Token = token.Token
+					showToken.RefreshType = token.RefreshType
+				}
+			}
+			defer dbConnect.Close()
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(showToken)
+		}
+	}
 }
 
 func RefreshToken () {
